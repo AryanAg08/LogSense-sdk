@@ -1,8 +1,17 @@
 // Package logsense is the Go SDK for LogSense.
+//
 // Usage:
 //
-//	logsense.Init("ls_live_your_api_key")
+//	import logsense "github.com/AryanAg08/LogSense-sdk"
+//
+//	logsense.Init("ls_live_your_api_key",
+//	    logsense.WithService("my-service"),
+//	    logsense.WithEnvironment("production"),
+//	)
+//	defer logsense.Shutdown()
+//
 //	logsense.Capture(err, context.Background())
+//	logsense.Log(ctx, "info", "user signed up", map[string]any{"user_id": "123"})
 package logsense
 
 import (
