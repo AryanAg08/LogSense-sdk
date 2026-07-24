@@ -10,7 +10,7 @@ The official Go SDK for [LogSense](https://aryangoyal.space) — structured log 
 ## Installation
 
 ```bash
-go get github.com/AryanAg08/logsense-go
+go get github.com/AryanAg08/logsense-sdk
 ```
 
 Requires Go 1.21 or later.
