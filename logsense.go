@@ -2,7 +2,7 @@
 //
 // Usage:
 //
-//	import logsense "github.com/AryanAg08/LogSense-sdk"
+//	import logsense "github.com/AryanAg08/logsense-sdk"
 //
 //	logsense.Init("ls_live_your_api_key",
 //	    logsense.WithService("my-service"),
@@ -26,10 +26,10 @@ import (
 )
 
 const (
-	defaultEndpoint  = "https://services.aryangoyal.space/ai-service"
-	defaultBatchSize = 50
+	defaultEndpoint      = "https://api.logsense.cloud/ai-service"
+	defaultBatchSize     = 50
 	defaultFlushInterval = 2 * time.Second
-	defaultTimeout   = 5 * time.Second
+	defaultTimeout       = 5 * time.Second
 )
 
 // Client is the LogSense SDK client. Create one with New() or use the package-level Init().
@@ -46,14 +46,14 @@ type Client struct {
 }
 
 type logEvent struct {
-	Source      string            `json:"source"`
-	Service     string            `json:"service"`
-	Environment string            `json:"environment"`
-	Level       string            `json:"level"`
-	Message     string            `json:"message"`
-	Structured  map[string]any    `json:"structured,omitempty"`
-	TraceID     string            `json:"traceID,omitempty"`
-	Timestamp   *time.Time        `json:"timestamp,omitempty"`
+	Source      string         `json:"source"`
+	Service     string         `json:"service"`
+	Environment string         `json:"environment"`
+	Level       string         `json:"level"`
+	Message     string         `json:"message"`
+	Structured  map[string]any `json:"structured,omitempty"`
+	TraceID     string         `json:"traceID,omitempty"`
+	Timestamp   *time.Time     `json:"timestamp,omitempty"`
 }
 
 // Option configures a Client.

@@ -1,6 +1,6 @@
 # LogSense Go SDK
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/AryanAg08/LogSense-sdk.svg)](https://pkg.go.dev/github.com/AryanAg08/LogSense-sdk)
+[![Go Reference](https://pkg.go.dev/badge/github.com/AryanAg08/logsense-sdk.svg)](https://pkg.go.dev/github.com/AryanAg08/logsense-sdk)
 [![Go Version](https://img.shields.io/badge/go-%3E%3D1.21-blue)](https://golang.org/dl/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
@@ -11,7 +11,7 @@ The official Go SDK for [LogSense](https://aryangoyal.space) — structured log 
 ## Installation
 
 ```bash
-go get github.com/AryanAg08/LogSense-sdk
+go get github.com/AryanAg08/logsense-sdk
 ```
 
 Requires Go 1.21 or later. No external dependencies — standard library only.
@@ -26,7 +26,7 @@ package main
 import (
     "context"
 
-    logsense "github.com/AryanAg08/LogSense-sdk"
+    logsense "github.com/AryanAg08/logsense-sdk"
 )
 
 func main() {

@@ -1,3 +1,3 @@
-module github.com/AryanAg08/LogSense-sdk
+module github.com/AryanAg08/logsense-sdk
 
 go 1.21
