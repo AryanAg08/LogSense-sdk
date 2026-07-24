@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	defaultEndpoint  = "https://services.aryangoyal.space/ai-service"
+	defaultEndpoint  = "https://api.logsense.cloud/ai-service"
 	defaultBatchSize = 50
 	defaultFlushInterval = 2 * time.Second
 	defaultTimeout   = 5 * time.Second
