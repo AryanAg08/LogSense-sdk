@@ -76,7 +76,12 @@ defer client.Shutdown()
 |---|---|---|
 | `WithService(name string)` | Service name attached to every log | `"unknown"` |
 | `WithEnvironment(env string)` | Environment tag (`prod`, `staging`, `dev`) | `"production"` |
-| `WithEndpoint(url string)` | Override the LogSense API base URL | `https://services.aryangoyal.space/ai-service` |
+| `WithEndpoint(url string)` | Override the LogSense API base URL | `https://api.logsense.cloud/ai-service` |
+| `WithOnError(fn func(error))` | Surface delivery failures (bad key, 5xx after retries, etc.) instead of losing logs silently | none |
+| `WithMaxQueue(n int)` | Cap buffered events; excess is dropped (drop-newest) and counted via `Dropped()` | `10000` |
+| `WithBatchSize(n int)` | Events buffered before an early flush | `50` |
+| `WithHTTPClient(hc *http.Client)` | Supply your own client (pooling, proxies, tests) instead of the SDK's default | 5s-timeout client |
+| `WithContextEnricher(fn)` | Pull a trace ID / fields out of the `context.Context` (e.g. OpenTelemetry) with no dependency on the SDK's side | none |
 
 ### Capture
 
@@ -110,8 +115,11 @@ Always call `Shutdown()` (or `defer logsense.Shutdown()`) before your process ex
 | Property | Detail |
 |---|---|
 | Non-blocking | All calls return immediately — zero latency impact on your application |
-| Batched delivery | Events sent every 2 s or when 50 events accumulate, whichever comes first |
-| Never panics | Network errors are silently dropped — your application is never interrupted |
+| Batched delivery | A single background sender ships events every 2 s or when 50 accumulate — never overlapping requests |
+| Bounded memory | The buffer is capped; if the endpoint is slow or down, events are dropped (and counted) rather than growing without limit |
+| Retries + visibility | Transient failures (network, 429, 5xx) are retried with backoff; anything that still fails is reported via `WithOnError`, never swallowed |
+| Never panics | The SDK never interrupts your application, even on delivery failure |
+| Stable grouping | `Capture` uses the bare error text as the message (stack goes in a structured field) so repeated errors group into one incident |
 | Source tagging | All events are tagged `source: "sdk-go"` so you can distinguish SDK traffic from raw HTTP calls in the dashboard |
 
 ---
