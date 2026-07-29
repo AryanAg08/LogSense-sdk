@@ -1,5 +1,6 @@
 # LogSense Go SDK
 
+[![CI](https://github.com/AryanAg08/logsense-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/AryanAg08/logsense-sdk/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/AryanAg08/logsense-sdk.svg)](https://pkg.go.dev/github.com/AryanAg08/logsense-sdk)
 [![Go Version](https://img.shields.io/badge/go-%3E%3D1.21-blue)](https://golang.org/dl/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -108,6 +109,14 @@ logsense.Shutdown()  // flush then stop the background goroutine
 
 Always call `Shutdown()` (or `defer logsense.Shutdown()`) before your process exits to avoid dropping buffered events.
 
+### Monitoring
+
+```go
+logsense.Dropped()  // int64: events discarded because the queue was full
+```
+
+A non-zero, growing value means the endpoint can't keep up with your log volume — raise `WithMaxQueue`, or investigate delivery failures via `WithOnError`.
+
 ---
 
 ## Behaviour
@@ -171,6 +180,31 @@ defer paymentClient.Shutdown()
 1. Sign up at [LogSense](https://aryangoyal.space)
 2. Create an organisation and project
 3. Generate an API key under **Project → API Keys**
+
+---
+
+## Development
+
+The public API lives in the root `logsense` package, which is a thin facade over
+the implementation. Internals are split by concern:
+
+| Package | Responsibility |
+|---|---|
+| `logsense` (root) | Public facade — re-exports `New`/`WithX` options and the package-level `Init`/`Capture`/`Log`/`Flush`/`Shutdown` helpers |
+| `core` | The `Client`: option wiring, the single background sender goroutine, and retry/backoff delivery |
+| `dtos` | Data-transfer types — the `LogEvent` wire format plus the `Config`/`Stream`/`Stats` structs that make up a client |
+| `constants` | Default configuration values and fixed limits |
+
+Run the checks locally (the same ones CI runs on every push and pull request):
+
+```bash
+gofmt -l .              # formatting
+go vet ./...            # static analysis
+go test -race ./...     # tests under the race detector
+```
+
+CI is defined in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) and gates
+every commit on a pull request.
 
 ---
 

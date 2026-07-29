@@ -1,4 +1,4 @@
-package logsense
+package core
 
 import (
 	"context"
@@ -6,13 +6,14 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/AryanAg08/logsense-sdk/constants"
 	"github.com/AryanAg08/logsense-sdk/dtos"
-	"time"
 )
 
 type captured struct {
@@ -86,7 +87,7 @@ func TestBatchWireFormatAndStableMessage(t *testing.T) {
 	if info.Structured["user_id"] != "123" {
 		t.Errorf("structured fields lost: %+v", info.Structured)
 	}
-	// #7: message must be stable (no stack embedded) so occurrences group.
+	// Message must be stable (no stack embedded) so occurrences group.
 	if errEvt.Message != "redis GET auth:token -> nil" {
 		t.Errorf("message not stable: %q", errEvt.Message)
 	}
@@ -95,6 +96,25 @@ func TestBatchWireFormatAndStableMessage(t *testing.T) {
 	}
 	if errEvt.Structured["path"] != "/login" {
 		t.Errorf("extra fields lost: %+v", errEvt.Structured)
+	}
+	// Every enqueued event should carry a timestamp.
+	if info.Timestamp == nil || errEvt.Timestamp == nil {
+		t.Errorf("timestamp not set on events")
+	}
+}
+
+func TestCaptureNilErrorIsNoop(t *testing.T) {
+	rec := &captured{}
+	srv := newServer(t, http.StatusAccepted, rec)
+	defer srv.Close()
+
+	c := New("k", WithEndpoint(srv.URL+"/ai-service"))
+	c.Capture(nil, context.Background())
+	c.Flush()
+	c.Shutdown()
+
+	if got := len(rec.all()); got != 0 {
+		t.Errorf("nil error should enqueue nothing, got %d events", got)
 	}
 }
 
@@ -216,5 +236,132 @@ func TestContextEnricherPopulatesTrace(t *testing.T) {
 	}
 	if events[0].Structured["span"] != "abc" {
 		t.Errorf("enricher fields not merged: %+v", events[0].Structured)
+	}
+}
+
+// Explicit fields must win over enricher-supplied fields of the same key.
+func TestEnricherDoesNotOverwriteExplicitFields(t *testing.T) {
+	rec := &captured{}
+	srv := newServer(t, http.StatusAccepted, rec)
+	defer srv.Close()
+
+	c := New("k", WithEndpoint(srv.URL+"/ai-service"),
+		WithContextEnricher(func(ctx context.Context) (string, map[string]any) {
+			return "", map[string]any{"user_id": "from-enricher"}
+		}))
+	c.Log(context.Background(), "info", "hi", map[string]any{"user_id": "explicit"})
+	c.Flush()
+	c.Shutdown()
+
+	events := rec.all()
+	if len(events) != 1 {
+		t.Fatalf("want 1 event, got %d", len(events))
+	}
+	if events[0].Structured["user_id"] != "explicit" {
+		t.Errorf("enricher overwrote explicit field: %+v", events[0].Structured)
+	}
+}
+
+func TestDefaultsApplied(t *testing.T) {
+	c := New("k")
+	defer c.Shutdown()
+	if c.cfg.Endpoint != constants.DefaultEndpoint {
+		t.Errorf("endpoint default = %q", c.cfg.Endpoint)
+	}
+	if c.cfg.Service != "unknown" || c.cfg.Env != "production" {
+		t.Errorf("service/env defaults wrong: %q/%q", c.cfg.Service, c.cfg.Env)
+	}
+	if c.cfg.BatchSize != constants.DefaultBatchSize || c.cfg.MaxRetries != constants.DefaultMaxRetries {
+		t.Errorf("batch/retry defaults wrong: %d/%d", c.cfg.BatchSize, c.cfg.MaxRetries)
+	}
+	if cap(c.stream.Events) != constants.DefaultMaxQueue {
+		t.Errorf("queue cap default = %d", cap(c.stream.Events))
+	}
+}
+
+func TestShutdownIsIdempotent(t *testing.T) {
+	c := New("k", WithEndpoint("http://127.0.0.1:0"))
+	c.Shutdown()
+	// A second Shutdown must not panic on a double channel close.
+	c.Shutdown()
+	// Flush after shutdown must return immediately, not deadlock.
+	done := make(chan struct{})
+	go func() { c.Flush(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatalf("Flush after Shutdown deadlocked")
+	}
+}
+
+func TestTruncate(t *testing.T) {
+	if got := truncate("short", 10); got != "short" {
+		t.Errorf("under-limit changed: %q", got)
+	}
+	if got := truncate("exactly-ten", len("exactly-ten")); got != "exactly-ten" {
+		t.Errorf("at-limit changed: %q", got)
+	}
+	got := truncate("abcdef", 3)
+	if !strings.HasPrefix(got, "abc") || !strings.HasSuffix(got, "(truncated)") {
+		t.Errorf("over-limit not truncated correctly: %q", got)
+	}
+}
+
+func TestRetryableClassification(t *testing.T) {
+	cases := []struct {
+		err  error
+		want bool
+	}{
+		{errors.New("dial tcp: connection refused"), true}, // network error
+		{&httpError{status: http.StatusTooManyRequests}, true},
+		{&httpError{status: http.StatusServiceUnavailable}, true},
+		{&httpError{status: http.StatusInternalServerError}, true},
+		{&httpError{status: http.StatusBadRequest}, false},
+		{&httpError{status: http.StatusUnauthorized}, false},
+		{&httpError{status: http.StatusRequestEntityTooLarge}, false},
+	}
+	for _, tc := range cases {
+		if got := retryable(tc.err); got != tc.want {
+			t.Errorf("retryable(%v) = %v, want %v", tc.err, got, tc.want)
+		}
+	}
+}
+
+func TestBackoffGrowsAndCaps(t *testing.T) {
+	if got := backoff(1); got != 200*time.Millisecond {
+		t.Errorf("backoff(1) = %v, want 200ms", got)
+	}
+	if got := backoff(2); got != 400*time.Millisecond {
+		t.Errorf("backoff(2) = %v, want 400ms", got)
+	}
+	if got := backoff(3); got != 800*time.Millisecond {
+		t.Errorf("backoff(3) = %v, want 800ms", got)
+	}
+	if got := backoff(50); got != 5*time.Second {
+		t.Errorf("backoff(50) = %v, want cap 5s", got)
+	}
+}
+
+func TestLongMessageAndStackAreTruncated(t *testing.T) {
+	rec := &captured{}
+	srv := newServer(t, http.StatusAccepted, rec)
+	defer srv.Close()
+
+	huge := strings.Repeat("x", constants.MaxMessageBytes+5000)
+	c := New("k", WithEndpoint(srv.URL+"/ai-service"))
+	c.Capture(errors.New(huge), context.Background())
+	c.Flush()
+	c.Shutdown()
+
+	events := rec.all()
+	if len(events) != 1 {
+		t.Fatalf("want 1 event, got %d", len(events))
+	}
+	if len(events[0].Message) > constants.MaxMessageBytes+len("…(truncated)") {
+		t.Errorf("message not truncated: %d bytes", len(events[0].Message))
+	}
+	stack, _ := events[0].Structured["stack"].(string)
+	if len(stack) > constants.MaxStackBytes+len("…(truncated)") {
+		t.Errorf("stack not truncated: %d bytes", len(stack))
 	}
 }
