@@ -1,5 +1,6 @@
 # LogSense Go SDK
 
+[![CI](https://github.com/AryanAg08/logsense-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/AryanAg08/logsense-sdk/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/AryanAg08/logsense-sdk.svg)](https://pkg.go.dev/github.com/AryanAg08/logsense-sdk)
 [![Go Version](https://img.shields.io/badge/go-%3E%3D1.21-blue)](https://golang.org/dl/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -76,7 +77,12 @@ defer client.Shutdown()
 |---|---|---|
 | `WithService(name string)` | Service name attached to every log | `"unknown"` |
 | `WithEnvironment(env string)` | Environment tag (`prod`, `staging`, `dev`) | `"production"` |
-| `WithEndpoint(url string)` | Override the LogSense API base URL | `https://services.aryangoyal.space/ai-service` |
+| `WithEndpoint(url string)` | Override the LogSense API base URL | `https://api.logsense.cloud/ai-service` |
+| `WithOnError(fn func(error))` | Surface delivery failures (bad key, 5xx after retries, etc.) instead of losing logs silently | none |
+| `WithMaxQueue(n int)` | Cap buffered events; excess is dropped (drop-newest) and counted via `Dropped()` | `10000` |
+| `WithBatchSize(n int)` | Events buffered before an early flush | `50` |
+| `WithHTTPClient(hc *http.Client)` | Supply your own client (pooling, proxies, tests) instead of the SDK's default | 5s-timeout client |
+| `WithContextEnricher(fn)` | Pull a trace ID / fields out of the `context.Context` (e.g. OpenTelemetry) with no dependency on the SDK's side | none |
 
 ### Capture
 
@@ -103,6 +109,14 @@ logsense.Shutdown()  // flush then stop the background goroutine
 
 Always call `Shutdown()` (or `defer logsense.Shutdown()`) before your process exits to avoid dropping buffered events.
 
+### Monitoring
+
+```go
+logsense.Dropped()  // int64: events discarded because the queue was full
+```
+
+A non-zero, growing value means the endpoint can't keep up with your log volume — raise `WithMaxQueue`, or investigate delivery failures via `WithOnError`.
+
 ---
 
 ## Behaviour
@@ -110,8 +124,11 @@ Always call `Shutdown()` (or `defer logsense.Shutdown()`) before your process ex
 | Property | Detail |
 |---|---|
 | Non-blocking | All calls return immediately — zero latency impact on your application |
-| Batched delivery | Events sent every 2 s or when 50 events accumulate, whichever comes first |
-| Never panics | Network errors are silently dropped — your application is never interrupted |
+| Batched delivery | A single background sender ships events every 2 s or when 50 accumulate — never overlapping requests |
+| Bounded memory | The buffer is capped; if the endpoint is slow or down, events are dropped (and counted) rather than growing without limit |
+| Retries + visibility | Transient failures (network, 429, 5xx) are retried with backoff; anything that still fails is reported via `WithOnError`, never swallowed |
+| Never panics | The SDK never interrupts your application, even on delivery failure |
+| Stable grouping | `Capture` uses the bare error text as the message (stack goes in a structured field) so repeated errors group into one incident |
 | Source tagging | All events are tagged `source: "sdk-go"` so you can distinguish SDK traffic from raw HTTP calls in the dashboard |
 
 ---
@@ -163,6 +180,31 @@ defer paymentClient.Shutdown()
 1. Sign up at [LogSense](https://aryangoyal.space)
 2. Create an organisation and project
 3. Generate an API key under **Project → API Keys**
+
+---
+
+## Development
+
+The public API lives in the root `logsense` package, which is a thin facade over
+the implementation. Internals are split by concern:
+
+| Package | Responsibility |
+|---|---|
+| `logsense` (root) | Public facade — re-exports `New`/`WithX` options and the package-level `Init`/`Capture`/`Log`/`Flush`/`Shutdown` helpers |
+| `core` | The `Client`: option wiring, the single background sender goroutine, and retry/backoff delivery |
+| `dtos` | Data-transfer types — the `LogEvent` wire format plus the `Config`/`Stream`/`Stats` structs that make up a client |
+| `constants` | Default configuration values and fixed limits |
+
+Run the checks locally (the same ones CI runs on every push and pull request):
+
+```bash
+gofmt -l .              # formatting
+go vet ./...            # static analysis
+go test -race ./...     # tests under the race detector
+```
+
+CI is defined in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) and gates
+every commit on a pull request.
 
 ---
 
