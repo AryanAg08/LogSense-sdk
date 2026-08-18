@@ -5,7 +5,7 @@
 [![Go Version](https://img.shields.io/badge/go-%3E%3D1.21-blue)](https://golang.org/dl/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-The official Go SDK for [LogSense](https://aryangoyal.space) — structured log ingestion with automatic AI-powered error analysis.
+The official Go SDK for [LogSense](https://logsense.cloud) — structured log ingestion with automatic AI-powered error analysis.
 
 ---
 
@@ -99,6 +99,48 @@ logsense.Log(ctx context.Context, level, message string, fields ...map[string]an
 ```
 
 Enqueues a log line at the specified level. Supported levels: `error`, `warn`, `info`, `debug`.
+
+### Tracing (spans)
+
+The SDK can emit **distributed traces** alongside logs, using the same batched,
+non-blocking sender. Spans are delivered to `/v1/traces/batch`.
+
+```go
+func handler(ctx context.Context) {
+    ctx, span := logsense.StartSpan(ctx, "GET /checkout",
+        logsense.WithSpanKind("server"),
+        logsense.WithSpanAttributes(map[string]any{"http.route": "/checkout"}),
+    )
+    defer span.End()
+
+    // Child spans inherit the trace ID and link to their parent automatically
+    // via the context.
+    if err := charge(ctx); err != nil {
+        span.SetError(err) // status ERROR + records the error
+    }
+
+    // Logs emitted with this ctx are stamped with the span's trace ID, so logs
+    // and traces correlate with no extra wiring.
+    logsense.Log(ctx, "info", "checkout complete")
+}
+
+func charge(ctx context.Context) error {
+    _, span := logsense.StartSpan(ctx, "charge card", logsense.WithSpanKind("client"))
+    defer span.End()
+    // ... do work ...
+    return nil
+}
+```
+
+Span methods: `End()` (records duration; idempotent), `SetStatus(code, msg)`,
+`SetError(err)`, `SetAttributes(map[string]any)`, `TraceID()`, `SpanID()`. Trace
+and span IDs are W3C-style hex (16- and 8-byte). Calling `StartSpan` on the
+package-level client before `Init` returns a safe no-op span, so `defer
+span.End()` never panics.
+
+The server accepts these native spans and is also a drop-in **OpenTelemetry OTLP**
+receiver on the same `/v1/traces` endpoint — you can point a standard OTel
+exporter at it directly if you prefer.
 
 ### Flush / Shutdown
 

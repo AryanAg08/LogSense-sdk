@@ -51,12 +51,14 @@ func WithEnvironment(env string) Option { return func(c *Client) { c.cfg.Env = e
 // otherwise lose logs with no signal. The callback must not block.
 func WithOnError(fn func(error)) Option { return func(c *Client) { c.cfg.OnError = fn } }
 
-// WithMaxQueue caps the number of buffered events. When the queue is full new
-// events are dropped (drop-newest) and counted; see Dropped. Default 10000.
+// WithMaxQueue caps the number of buffered events (logs and spans each get their
+// own queue of this size). When a queue is full new events are dropped
+// (drop-newest) and counted; see Dropped. Default 10000.
 func WithMaxQueue(n int) Option {
 	return func(c *Client) {
 		if n > 0 {
 			c.stream.Events = make(chan dtos.LogEvent, n)
+			c.stream.Spans = make(chan dtos.SpanEvent, n)
 		}
 	}
 }
@@ -106,6 +108,7 @@ func New(apiKey string, opts ...Option) *Client {
 		},
 		stream: dtos.Stream{
 			Events:   make(chan dtos.LogEvent, constants.DefaultMaxQueue),
+			Spans:    make(chan dtos.SpanEvent, constants.DefaultMaxQueue),
 			FlushReq: make(chan chan struct{}),
 			Stop:     make(chan struct{}),
 			Stopped:  make(chan struct{}),
@@ -198,6 +201,11 @@ func (c *Client) Shutdown() {
 }
 
 func (c *Client) enrich(ctx context.Context, e *dtos.LogEvent) {
+	// Correlate with an active SDK span, if any, so logs emitted inside a span
+	// carry its trace ID. An explicit enricher trace ID (below) still wins.
+	if tid := activeTraceID(ctx); tid != "" {
+		e.TraceID = tid
+	}
 	if c.cfg.Enricher == nil || ctx == nil {
 		return
 	}
@@ -228,6 +236,15 @@ func (c *Client) enqueue(e dtos.LogEvent) {
 	}
 }
 
+func (c *Client) enqueueSpan(s dtos.SpanEvent) {
+	select {
+	case c.stream.Spans <- s:
+	default:
+		// Queue full: drop-newest and count it, rather than grow without bound.
+		atomic.AddInt64(&c.stats.Dropped, 1)
+	}
+}
+
 // run is the single sender goroutine. It owns the batch slice, so there is
 // never more than one in-flight send and the buffer lives in exactly one place.
 func (c *Client) run() {
@@ -235,23 +252,37 @@ func (c *Client) run() {
 	t := time.NewTicker(c.cfg.FlushEvery)
 	defer t.Stop()
 
-	batch := make([]dtos.LogEvent, 0, c.cfg.BatchSize)
-	flush := func() {
-		if len(batch) == 0 {
-			return
+	logs := make([]dtos.LogEvent, 0, c.cfg.BatchSize)
+	spans := make([]dtos.SpanEvent, 0, c.cfg.BatchSize)
+
+	flushLogs := func() {
+		if len(logs) > 0 {
+			c.send(logs)
+			logs = logs[:0]
 		}
-		c.send(batch)
-		batch = batch[:0]
 	}
-	// drain pulls everything currently queued into the batch (flushing whenever
-	// it reaches batchSize) so Flush/Shutdown don't leave events behind.
+	flushSpans := func() {
+		if len(spans) > 0 {
+			c.sendSpans(spans)
+			spans = spans[:0]
+		}
+	}
+	flushAll := func() { flushLogs(); flushSpans() }
+
+	// drain pulls everything currently queued into its batch (flushing whenever
+	// a batch reaches batchSize) so Flush/Shutdown don't leave events behind.
 	drain := func() {
 		for {
 			select {
 			case e := <-c.stream.Events:
-				batch = append(batch, e)
-				if len(batch) >= c.cfg.BatchSize {
-					flush()
+				logs = append(logs, e)
+				if len(logs) >= c.cfg.BatchSize {
+					flushLogs()
+				}
+			case s := <-c.stream.Spans:
+				spans = append(spans, s)
+				if len(spans) >= c.cfg.BatchSize {
+					flushSpans()
 				}
 			default:
 				return
@@ -262,19 +293,24 @@ func (c *Client) run() {
 	for {
 		select {
 		case e := <-c.stream.Events:
-			batch = append(batch, e)
-			if len(batch) >= c.cfg.BatchSize {
-				flush()
+			logs = append(logs, e)
+			if len(logs) >= c.cfg.BatchSize {
+				flushLogs()
+			}
+		case s := <-c.stream.Spans:
+			spans = append(spans, s)
+			if len(spans) >= c.cfg.BatchSize {
+				flushSpans()
 			}
 		case <-t.C:
-			flush()
+			flushAll()
 		case done := <-c.stream.FlushReq:
 			drain()
-			flush()
+			flushAll()
 			close(done)
 		case <-c.stream.Stop:
 			drain()
-			flush()
+			flushAll()
 			return
 		}
 	}
@@ -294,13 +330,30 @@ func (c *Client) send(batch []dtos.LogEvent) {
 		c.reportError(fmt.Errorf("logsense: marshal batch of %d events: %w", len(batch), err))
 		return
 	}
+	c.deliver(constants.LogsBatchPath, body, len(batch))
+}
 
+func (c *Client) sendSpans(batch []dtos.SpanEvent) {
+	type batchReq struct {
+		Spans []dtos.SpanEvent `json:"spans"`
+	}
+	body, err := json.Marshal(batchReq{Spans: batch})
+	if err != nil {
+		c.reportError(fmt.Errorf("logsense: marshal batch of %d spans: %w", len(batch), err))
+		return
+	}
+	c.deliver(constants.TracesBatchPath, body, len(batch))
+}
+
+// deliver POSTs body to path, retrying transient failures with backoff. It is
+// shared by the log and span senders so both get identical retry semantics.
+func (c *Client) deliver(path string, body []byte, count int) {
 	var lastErr error
 	for attempt := 0; attempt <= c.cfg.MaxRetries; attempt++ {
 		if attempt > 0 {
 			time.Sleep(backoff(attempt))
 		}
-		lastErr = c.doSend(body)
+		lastErr = c.doSend(path, body)
 		if lastErr == nil {
 			return
 		}
@@ -308,11 +361,11 @@ func (c *Client) send(batch []dtos.LogEvent) {
 			break
 		}
 	}
-	c.reportError(fmt.Errorf("logsense: dropped %d events after %d attempt(s): %w", len(batch), c.cfg.MaxRetries+1, lastErr))
+	c.reportError(fmt.Errorf("logsense: dropped %d events after %d attempt(s): %w", count, c.cfg.MaxRetries+1, lastErr))
 }
 
-func (c *Client) doSend(body []byte) error {
-	req, err := http.NewRequest(http.MethodPost, c.cfg.Endpoint+"/v1/logs/batch", bytes.NewReader(body))
+func (c *Client) doSend(path string, body []byte) error {
+	req, err := http.NewRequest(http.MethodPost, c.cfg.Endpoint+path, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
