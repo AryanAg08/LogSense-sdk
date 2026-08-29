@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/AryanAg08/logsense-sdk/constants"
-	"github.com/AryanAg08/logsense-sdk/dtos"
+	"github.com/Logsense-tech/logsense-sdk/constants"
+	"github.com/Logsense-tech/logsense-sdk/dtos"
 )
 
 // spanCtxKey is the private context key under which the active span is carried,

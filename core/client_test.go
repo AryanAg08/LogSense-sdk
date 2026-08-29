@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/AryanAg08/logsense-sdk/constants"
-	"github.com/AryanAg08/logsense-sdk/dtos"
+	"github.com/Logsense-tech/logsense-sdk/constants"
+	"github.com/Logsense-tech/logsense-sdk/dtos"
 )
 
 type captured struct {

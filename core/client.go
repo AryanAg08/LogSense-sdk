@@ -15,8 +15,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/AryanAg08/logsense-sdk/constants"
-	"github.com/AryanAg08/logsense-sdk/dtos"
+	"github.com/Logsense-tech/logsense-sdk/constants"
+	"github.com/Logsense-tech/logsense-sdk/dtos"
 )
 
 // Client is the LogSense SDK client. Create one with New().

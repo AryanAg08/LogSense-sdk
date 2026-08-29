@@ -6,7 +6,7 @@
 //
 // Usage:
 //
-//	import logsense "github.com/AryanAg08/logsense-sdk"
+//	import logsense "github.com/Logsense-tech/logsense-sdk"
 //
 //	logsense.Init("ls_live_your_api_key",
 //	    logsense.WithService("my-service"),
@@ -23,7 +23,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/AryanAg08/logsense-sdk/core"
+	"github.com/Logsense-tech/logsense-sdk/core"
 )
 
 // Client is the LogSense SDK client. Create one with New() or use the

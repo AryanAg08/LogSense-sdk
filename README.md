@@ -1,7 +1,7 @@
 # LogSense Go SDK
 
-[![CI](https://github.com/AryanAg08/logsense-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/AryanAg08/logsense-sdk/actions/workflows/ci.yml)
-[![Go Reference](https://pkg.go.dev/badge/github.com/AryanAg08/logsense-sdk.svg)](https://pkg.go.dev/github.com/AryanAg08/logsense-sdk)
+[![CI](https://github.com/Logsense-tech/logsense-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/Logsense-tech/logsense-sdk/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/Logsense-tech/logsense-sdk.svg)](https://pkg.go.dev/github.com/Logsense-tech/logsense-sdk)
 [![Go Version](https://img.shields.io/badge/go-%3E%3D1.21-blue)](https://golang.org/dl/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
@@ -12,7 +12,7 @@ The official Go SDK for [LogSense](https://logsense.cloud) — structured log in
 ## Installation
 
 ```bash
-go get github.com/AryanAg08/logsense-sdk
+go get github.com/Logsense-tech/logsense-sdk
 ```
 
 Requires Go 1.21 or later. No external dependencies — standard library only.
@@ -27,7 +27,7 @@ package main
 import (
     "context"
 
-    logsense "github.com/AryanAg08/logsense-sdk"
+    logsense "github.com/Logsense-tech/logsense-sdk"
 )
 
 func main() {
