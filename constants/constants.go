@@ -5,7 +5,7 @@ package constants
 import "time"
 
 const (
-	DefaultEndpoint      = "https://api.logsense.cloud/ai-service"
+	DefaultEndpoint      = "https://services.logsense.cloud/ai-service"
 	DefaultBatchSize     = 50
 	DefaultFlushInterval = 2 * time.Second
 	DefaultTimeout       = 5 * time.Second
